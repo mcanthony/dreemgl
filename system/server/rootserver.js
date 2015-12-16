@@ -1,6 +1,6 @@
-/* Copyright 2015 Teem2 LLC. Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License.  
-   You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0 Unless required by applicable law or agreed to in writing, 
-   software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, 
+/* Copyright 2015 Teem2 LLC. Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0 Unless required by applicable law or agreed to in writing,
+   software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
    either express or implied. See the License for the specific language governing permissions and limitations under the License.*/
 // Teem server
 
@@ -18,6 +18,7 @@ define.class(function(require){
 	var NodeWebSocket = require('./nodewebsocket')
 	var mimeFromFile = require('./mimefromfile')
 	var CompositionServer = require('./compositionserver')
+	var HTMLParser = require('$system/parse/htmlparser')
 
 	var BusServer = require('$system/rpc/busserver')
 
@@ -50,7 +51,7 @@ define.class(function(require){
 			console.color('Server running' + txt + '~~ Ready to go!\n')
 		}
 		else {
-			this.address = 'http://' + iface + ':' + port + '/' 
+			this.address = 'http://' + iface + ':' + port + '/'
 			console.color('Server running on ~c~' + this.address + "~~\n")
 		}
 		// use the browser spawner
@@ -71,7 +72,7 @@ define.class(function(require){
 				}
 			}
 			//file = file.slice(define.expandVariables(define.$root).length).replace(/\\/g, "/")
-			// ok lets rip off our 
+			// ok lets rip off our
 			this.broadcast({
 				type:'filechange',
 				file: file
@@ -100,7 +101,7 @@ define.class(function(require){
 	this.default_composition = null
 
 	this.getComposition = function(file){
-		
+
 		// lets find the composition either in define.COMPOSITIONS
 		if(!this.compositions[file]) this.compositions[file] = new CompositionServer(this.args, file, this)
 		return this.compositions[file]
@@ -112,7 +113,7 @@ define.class(function(require){
 		sock.url = req.url
 		var mypath = req.url.slice(1)
 		if(mypath) this.getComposition('$' + mypath).busserver.addWebSocket(sock)
-		else this.busserver.addWebSocket(sock) 
+		else this.busserver.addWebSocket(sock)
 	}
 
 	// maps an input path into our files
@@ -167,7 +168,7 @@ define.class(function(require){
 			proxy_req.end()
 			return
 		}
-		
+
 		if(requrl =='/favicon.ico'){
 			res.writeHead(200)
 			res.end()
@@ -176,8 +177,65 @@ define.class(function(require){
 
 		var reqquery = requrl.split('?')
 
-		// ok if we are a /single fetch 
+		// ok if we are a /single fetch
 		var file = this.mapPath(reqquery[0])
+		var urlext = define.fileExt(reqquery[0])
+
+		var makeSpace = function(indent) {
+			var out = '';
+			for (var i = 0; i < indent; i++) {
+				out += '  ';
+			}
+			return out;
+		}
+		var filterSpecial = function(child) {
+			return child.tag.indexOf('$') !== 0;
+		}
+		var tagToFunc = function(child, indent) {
+			// console.log('tagToFunc', indent, child, child.tag.indexOf('$'))
+			var outputthis = filterSpecial(child);
+			var out = '';
+			var children = child.child && child.child.filter(filterSpecial);
+			if (outputthis) {
+				out += makeSpace(indent);
+				out += child.tag + '(';
+				out += JSON.stringify(child.attr);
+				if (children) out += ',\n'
+			}
+			if (children && children.length) {
+				indent++;
+				for (var i = 0; i < children.length; i++) {
+					newchild = children[i];
+					if (filterSpecial(newchild)) {
+						out += tagToFunc(newchild, indent);
+						if (i !== children.length - 1) {
+							out += ','
+						}
+						out += '\n';
+					}
+				}
+				indent--;
+			}
+			if (outputthis) {
+				if (children) out += makeSpace(indent);
+				out += ')';
+			}
+			return out;
+		}
+		if (urlext === 'dre') {
+			var path = define.expandVariables('$root' + reqquery[0])
+			// transform .xml to .js
+			var parsed = HTMLParser(fs.readFileSync(path));
+			// console.log('dre', reqquery[0], parsed)
+			var out = 'define.class(function($server$, composition, role, $ui$, screen, view){\n  this.render = function(){ return [\n';
+			out += tagToFunc(parsed, 1);
+			out += '  ];};\n});'
+			// write to .dre.js file and redirect there
+			fs.writeFileSync(path + '.js', out);
+			res.writeHead(307, {location:reqquery[0] + '.js'})
+			res.end()
+			return
+		}
 
 		if(file === false){ // file is a search
 			// what are we looking for
@@ -233,7 +291,7 @@ define.class(function(require){
 			if( req.headers['if-none-match'] == header.etag){
 				res.writeHead(304,header)
 				res.end()
-				return 
+				return
 			}
 			// lets add a gzip cache
 			var type = header["Content-Type"]
@@ -243,6 +301,7 @@ define.class(function(require){
 					//header["Content-Type"]+="; utf8"
 					header["Content-encoding"] = "gzip"
 					header["Transfer-Encoding"] = "gzip"
+					console.log('path', path)
 					var gzip_file = path.join(this.cache_gzip, requrl.replace(/\//g,'_')+header.etag)
 					fs.stat(gzip_file, function(err, stat){
 						if(err){ // make it
@@ -269,7 +328,7 @@ define.class(function(require){
 				else{
 					var stream = fs.createReadStream(file)
 					res.writeHead(200, header)
-					stream.pipe(res)					
+					stream.pipe(res)
 				}
 			}
 			else{
@@ -278,7 +337,7 @@ define.class(function(require){
 				stream.pipe(res)
 			}
 			// ok so we get a filechange right?
-			
+
 		}.bind(this)
 	}
 })
